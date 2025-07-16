@@ -4,15 +4,15 @@ using LabApi.Features.Console;
 using LabApi.Loader;
 using LabApi.Loader.Features.Plugins;
 
-namespace Sized;
+namespace Sprayed;
 
 // ReSharper disable once ClassNeverInstantiated.Global
 public class Plugin : Plugin<Config>
 {
-    public override string Name { get; } = "Sized";
+    public override string Name { get; } = "Sprayed";
 
     public override string Description { get; } =
-        "A terrible plugin for SCP:SL using the LabAPI framework that gives each player a random size between two specified values at the start of the round and persists it until the round ends. ";
+        "A painful Zeitvertreib plugin to mimic CS:GO's spray mechanic in SCP:SL using the texttoy.";
 
     public override string Author { get; } = "AlexInABox";
     public override Version Version { get; } = new(1, 0, 0);
