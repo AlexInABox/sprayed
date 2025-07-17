@@ -1,13 +1,14 @@
 using System.Collections.Generic;
 using System.Net.Http;
-using System.Text;
 using System.Threading.Tasks;
 using System;
+using System.Linq;
 using LabApi.Events.Arguments.PlayerEvents;
 using LabApi.Features.Wrappers;
 using UserSettings.ServerSpecific;
 using UnityEngine;
 using MEC;
+using TMPro;
 using Logger = LabApi.Features.Console.Logger;
 
 namespace Sprayed;
@@ -15,6 +16,7 @@ namespace Sprayed;
 public static class EventHandlers
 {
     private static readonly Dictionary<int, int> Cooldowns = new();
+    private static readonly Dictionary<int, int> RefreshCooldowns = new();
     private static readonly Dictionary<string, string> Sprays = new();
 
     public static void RegisterEvents()
@@ -28,12 +30,20 @@ public static class EventHandlers
         
         var extra = new ServerSpecificSettingBase[]
         {
-            new SSGroupHeader("CS:GO (Zeitvertreib) Spray"),
+            new SSGroupHeader(Plugin.Instance.Translation.SprayGroupHeader),
             new SSKeybindSetting(
                 Plugin.Instance.Config.KeybindId,
                 Plugin.Instance.Translation.KeybindSettingLabel,
                 KeyCode.None, false, false,
-                Plugin.Instance.Translation.KeybindSettingHintDescription)
+                Plugin.Instance.Translation.KeybindSettingHintDescription),
+            new SSButton(Plugin.Instance.Config.KeybindId, null, Plugin.Instance.Translation.ReloadSprayButtonLabel),
+            new SSTextArea(
+                Plugin.Instance.Config.KeybindId,
+                "<link=https://dev.zeitvertreib.vip/dashboard><align=center><color=#8A2BE2><size=110%><u>Klicke hier um dein eigenes Spray festzulegen!</u></size></color></align></link>",
+                SSTextArea.FoldoutMode.NotCollapsable,
+                null,
+                TextAlignmentOptions.Center
+            )
         };
 
         var existing = ServerSpecificSettingsSync.DefinedSettings ?? [];
@@ -49,7 +59,6 @@ public static class EventHandlers
     public static void UnregisterEvents()
     {
         ServerSpecificSettingsSync.ServerOnSettingValueReceived -= OnSSSReceived;
-        
     }
 
     private static void OnJoined(PlayerJoinedEventArgs ev)
@@ -66,7 +75,23 @@ public static class EventHandlers
         if (ev is SSKeybindSetting keybindSetting &&
             keybindSetting.SettingId == Plugin.Instance.Config.KeybindId &&
             keybindSetting.SyncIsPressed)
+        {
             PlaceSpray(player);
+            return;
+        }
+        
+        if (ev is SSButton button && button.SettingId == Plugin.Instance.Config.KeybindId)
+        {
+            if (RefreshCooldowns.TryGetValue(player.PlayerId, out int cooldown) && cooldown > Time.time)
+            {
+                return;
+            }
+            // Reload spray for the player
+            _ = SetSprayForUserFromBackend(player.UserId);
+            player.SendHint(Plugin.Instance.Translation.SpraysRefreshed, 10f);
+            RefreshCooldowns[player.PlayerId] = (int)(Time.time + 5f); // 5 seconds cooldown for refreshing sprays
+            Logger.Debug($"Reloaded spray for player {player.UserId} ({player.PlayerId})");
+        }
     }
     
     private static async void PlaceSpray(Player player)
@@ -105,14 +130,16 @@ public static class EventHandlers
 
         Logger.Debug($"Hit layer: {LayerMask.LayerToName(hit.transform.gameObject.layer)} ({hit.transform.gameObject.layer})");
 
+        if (string.IsNullOrEmpty(Sprays[player.UserId]))
+        {
+            player.SendHint(Plugin.Instance.Translation.NoSprayFound, 10f);
+            return;
+        }
+        
         // Get spray text from backend
         string sprayText = Sprays[player.UserId];
         
-        if (string.IsNullOrEmpty(sprayText))
-        {
-            player.SendHint("Set a custom spray at \"dev.zeitvertreib.vip\" ^^", 10f);
-            return;
-        }
+        
 
         Vector3 forward = -hit.normal;
         Vector3 right = Vector3.Cross(Vector3.up, forward).normalized;
@@ -121,8 +148,11 @@ public static class EventHandlers
         Vector3 basePos = hit.point + hit.normal * 0.01f;
         Quaternion rotation = Quaternion.LookRotation(forward);
 
-        CreateText(basePos, new Vector3(0.05f, 0.068f, 1f), rotation, sprayText, 25f);
-        CreateText(basePos + up * 0.005f + right * 0.005f, new Vector3(0.05f, 0.068f, 1f), rotation, sprayText, 25f);
+        string[] rows = sprayText.Split('\n');
+        int quarter = rows.Length / 4;
+        
+        Timing.RunCoroutine(SpawnSpray(basePos, rotation, sprayText));
+
         PlaySoundEffect(basePos);
 
         Cooldowns[player.PlayerId] = (int)(Time.time + Plugin.Instance.Config.CooldownDuration);
@@ -130,7 +160,30 @@ public static class EventHandlers
         player.SendHint(Plugin.Instance.Translation.AbilityUsed, 3f);
     }
     
-    private static void CreateText(Vector3 pos, Vector3 scale, Quaternion rot, string text, float time = 20)
+    private static IEnumerator<float> SpawnSpray(Vector3 basePos, Quaternion rotation, string sprayText)
+    {
+        string[] lines = sprayText.Split('\n').Where(line => !string.IsNullOrWhiteSpace(line)).ToArray();
+
+        float lineSpacing = 0.01f; // Manual line spacing - adjust this value as needed
+        
+        // Calculate total height of the spray
+        float totalHeight = (lines.Length - 1) * lineSpacing;
+        
+        // Start at half the total height above the hit point to center the spray
+        Vector3 pos = basePos + rotation * Vector3.up * (totalHeight / 2);
+        
+        for (int i = 0; i < lines.Length; i++)
+        {
+            TextToy toy = CreateText(pos, new Vector3(0.015f, 0.01f, 1f), rotation, lines[i], 25f);
+            
+            // Move down for next line
+            pos -= rotation * Vector3.up * lineSpacing;
+            
+            yield return Timing.WaitForOneFrame;
+        }
+    }
+    
+    private static TextToy CreateText(Vector3 pos, Vector3 scale, Quaternion rot, string text, float time = 20)
     {
         TextToy textToy = TextToy.Create();
         textToy.Position = pos;
@@ -138,9 +191,12 @@ public static class EventHandlers
         textToy.Rotation = rot;
         textToy.DisplaySize = new Vector2(100000, 100000);
         textToy.TextFormat = text;
-
+        
         Timing.CallDelayed(time, textToy.Destroy);
+        
+        return textToy;
     }
+
 
     private static void PlaySoundEffect(Vector3 pos)
     {
@@ -176,7 +232,7 @@ public static class EventHandlers
                 else
                 {
                     Logger.Debug($"Failed to fetch spray for User ID: {userId}. Status: {response.StatusCode}");
-                    return;
+                    Sprays[userId] = String.Empty;
                 }
             }
         }

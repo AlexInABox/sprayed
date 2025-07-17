@@ -17,6 +17,10 @@
         <Reference Include="UnityEngine.PhysicsModule" HintPath="$(REFERENCES_PATH)\UnityEngine.PhysicsModule.dll" Private="false"/>
         <Reference Include="CommandSystem.Core" HintPath="$(REFERENCES_PATH)\CommandSystem.Core.dll" Private="false"/>
         <Reference Include="AudioPlayerApi" HintPath="$(REFERENCES_PATH)\AudioPlayerApi.dll" Private="false"/>
+        <Reference Include="TextMeshPro" HintPath="$(REFERENCES_PATH)\Unity.TextMeshPro.dll" Private="false"/>
+        <Reference Include="UnityEngine.UI">
+          <HintPath>..\..\EXILED_REFERENCES\UnityEngine.UI.dll</HintPath>
+        </Reference>
     </ItemGroup>
 
     <ItemGroup>
