@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using System;
 using System.Linq;
+using Interactables.Interobjects;
 using LabApi.Events.Arguments.PlayerEvents;
 using LabApi.Features.Wrappers;
 using UserSettings.ServerSpecific;
@@ -18,6 +19,7 @@ public static class EventHandlers
     private static readonly Dictionary<int, int> Cooldowns = new();
     private static readonly Dictionary<int, int> RefreshCooldowns = new();
     private static readonly Dictionary<string, string> Sprays = new();
+    private static readonly Dictionary<int, List<TextToy>> ActiveSprays = new();
 
     public static void RegisterEvents()
     {
@@ -119,7 +121,6 @@ public static class EventHandlers
             (1 << 17) | // Ragdoll
             (1 << 18) | // CCTV
             (1 << 20) | // Grenade
-            (1 << 27) | // Door
             (1 << 28) | // Skybox
             (1 << 29);  // Fence
 
@@ -127,6 +128,11 @@ public static class EventHandlers
 
         if (!Physics.Raycast(origin, direction, out RaycastHit hit, 2.5f, layerMask))
             return;
+
+        if (Player.TryGet(hit.transform.gameObject, out _))
+        {
+            return;
+        }
 
         Logger.Debug($"Hit layer: {LayerMask.LayerToName(hit.transform.gameObject.layer)} ({hit.transform.gameObject.layer})");
 
@@ -136,22 +142,29 @@ public static class EventHandlers
             return;
         }
         
+        if (ActiveSprays.TryGetValue(player.PlayerId, out var sprays) && sprays?.Count > 0)
+        {
+            sprays.ForEach(s => {
+                if (!s.IsDestroyed)
+                {
+                    s.Destroy();
+                }
+            });
+            ActiveSprays.Remove(player.PlayerId);
+        }
+        
         // Get spray text from backend
         string sprayText = Sprays[player.UserId];
         
-        
-
         Vector3 forward = -hit.normal;
         Vector3 right = Vector3.Cross(Vector3.up, forward).normalized;
         Vector3 up = Vector3.Cross(forward, right).normalized;
 
         Vector3 basePos = hit.point + hit.normal * 0.01f;
         Quaternion rotation = Quaternion.LookRotation(forward);
-
-        string[] rows = sprayText.Split('\n');
-        int quarter = rows.Length / 4;
+        Vector3 realScale = new Vector3(0.015f, 0.01f, 1f);
         
-        Timing.RunCoroutine(SpawnSpray(basePos, rotation, sprayText));
+        Timing.RunCoroutine(SpawnSpray(basePos, rotation, realScale, sprayText, hit.transform, player.PlayerId));
 
         PlaySoundEffect(basePos);
 
@@ -160,7 +173,7 @@ public static class EventHandlers
         player.SendHint(Plugin.Instance.Translation.AbilityUsed, 3f);
     }
     
-    private static IEnumerator<float> SpawnSpray(Vector3 basePos, Quaternion rotation, string sprayText)
+    private static IEnumerator<float> SpawnSpray(Vector3 basePos, Quaternion rotation, Vector3 scale, string sprayText, Transform parent, int playerId)
     {
         string[] lines = sprayText.Split('\n').Where(line => !string.IsNullOrWhiteSpace(line)).ToArray();
 
@@ -172,30 +185,49 @@ public static class EventHandlers
         // Start at half the total height above the hit point to center the spray
         Vector3 pos = basePos + rotation * Vector3.up * (totalHeight / 2);
         
+        ActiveSprays[playerId] = new List<TextToy>();
         for (int i = 0; i < lines.Length; i++)
         {
-            TextToy toy = CreateText(pos, new Vector3(0.015f, 0.01f, 1f), rotation, lines[i], 25f);
+            ActiveSprays[playerId].Add(CreateText(pos, scale, rotation, lines[i], parent));
             
             // Move down for next line
             pos -= rotation * Vector3.up * lineSpacing;
+
+            yield return Timing.WaitForOneFrame;
+        }
+    }
+    
+    private static TextToy CreateText(Vector3 pos, Vector3 scale, Quaternion rot, string text, Transform parent)
+    {
+        TextToy textToy = TextToy.Create();
+        textToy.Scale = scale;
+        textToy.Rotation = rot;
+        textToy.DisplaySize = new Vector2(100000, 100000);
+        textToy.TextFormat = text;
+        textToy.Position = pos;
+
+        Timing.RunCoroutine(SprayLifeTime(pos, parent, textToy));
+        Timing.CallDelayed(300f, textToy.Destroy);
+        
+        return textToy;
+    }
+
+    private static IEnumerator<float> SprayLifeTime(Vector3 basePos, Transform parent, TextToy textToy)
+    {
+        Vector3 oldParentPosition = parent.position;
+        Quaternion oldParentRotation = parent.rotation;
+        while(!textToy.IsDestroyed)
+        {
+            textToy.Position += (parent.position - oldParentPosition);
+            textToy.Rotation = parent.rotation * oldParentRotation;
+            oldParentPosition = parent.position;
+            oldParentRotation = parent.rotation;
             
             yield return Timing.WaitForOneFrame;
         }
     }
     
-    private static TextToy CreateText(Vector3 pos, Vector3 scale, Quaternion rot, string text, float time = 20)
-    {
-        TextToy textToy = TextToy.Create();
-        textToy.Position = pos;
-        textToy.Scale = scale;
-        textToy.Rotation = rot;
-        textToy.DisplaySize = new Vector2(100000, 100000);
-        textToy.TextFormat = text;
-        
-        Timing.CallDelayed(time, textToy.Destroy);
-        
-        return textToy;
-    }
+    
 
 
     private static void PlaySoundEffect(Vector3 pos)
