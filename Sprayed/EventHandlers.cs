@@ -219,7 +219,7 @@ public static class EventHandlers
         while(!textToy.IsDestroyed)
         {
             textToy.Position += (parent.position - oldParentPosition);
-            textToy.Rotation = parent.rotation * oldParentRotation;
+            textToy.Rotation = parent.rotation * Quaternion.Inverse(oldParentRotation) * textToy.Rotation;
             oldParentPosition = parent.position;
             oldParentRotation = parent.rotation;
             
