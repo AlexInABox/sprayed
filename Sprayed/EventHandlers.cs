@@ -93,7 +93,7 @@ public static class EventHandlers
         }
     }
 
-    private static async void PlaceSpray(Player player)
+    private static void PlaceSpray(Player player)
     {
         if (player == null || !player.IsAlive || player.IsDisarmed)
             return;
@@ -180,13 +180,19 @@ public static class EventHandlers
         Vector3 pos = basePos + rotation * Vector3.up * (totalHeight / 2);
 
         ActiveSprays[playerId] = new List<TextToy>();
-        for (int i = 0; i < lines.Length; i++)
+        ActiveSprays[playerId].Add(CreateText(pos, scale, rotation, lines[0], parent));
+        foreach (string line in lines)
         {
-            ActiveSprays[playerId].Add(CreateText(pos, scale, rotation, lines[i], parent));
+            ActiveSprays[playerId].Add(CreateText(pos, scale, rotation, "", parent));
 
             // Move down for next line
             pos -= rotation * Vector3.up * lineSpacing;
+        }
 
+        for (int i = 0; i < ActiveSprays[playerId].Count; i++)
+        {
+            TextToy textToy = ActiveSprays[playerId][i];
+            textToy.TextFormat = i < lines.Length ? lines[i] : string.Empty; // Clear remaining lines
             yield return Timing.WaitForOneFrame;
         }
     }
@@ -200,6 +206,7 @@ public static class EventHandlers
         textToy.TextFormat = text;
         textToy.Position = pos;
 
+
         Timing.RunCoroutine(SprayLifeTime(pos, parent, textToy));
         Timing.CallDelayed(300f, textToy.Destroy);
 
@@ -208,14 +215,15 @@ public static class EventHandlers
 
     private static IEnumerator<float> SprayLifeTime(Vector3 basePos, Transform parent, TextToy textToy)
     {
-        Vector3 oldParentPosition = parent.position;
-        Quaternion oldParentRotation = parent.rotation;
+        // Cache the local offset
+        Vector3 localOffset = Quaternion.Inverse(parent.rotation) * (textToy.Position - parent.position);
+        Quaternion localRotation = Quaternion.Inverse(parent.rotation) * textToy.Rotation;
+
         while (!textToy.IsDestroyed)
         {
-            textToy.Position += parent.position - oldParentPosition;
-            textToy.Rotation = parent.rotation * Quaternion.Inverse(oldParentRotation) * textToy.Rotation;
-            oldParentPosition = parent.position;
-            oldParentRotation = parent.rotation;
+            // Reapply full transform each frame
+            textToy.Position = parent.position + parent.rotation * localOffset;
+            textToy.Rotation = parent.rotation * localRotation;
 
             yield return Timing.WaitForOneFrame;
         }
