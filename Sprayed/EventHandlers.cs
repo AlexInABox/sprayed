@@ -1,15 +1,15 @@
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Threading.Tasks;
-using System;
-using System.Linq;
-using Interactables.Interobjects;
 using LabApi.Events.Arguments.PlayerEvents;
+using LabApi.Events.Handlers;
 using LabApi.Features.Wrappers;
-using UserSettings.ServerSpecific;
-using UnityEngine;
 using MEC;
 using TMPro;
+using UnityEngine;
+using UserSettings.ServerSpecific;
 using Logger = LabApi.Features.Console.Logger;
 
 namespace Sprayed;
@@ -23,14 +23,14 @@ public static class EventHandlers
 
     public static void RegisterEvents()
     {
-        LabApi.Events.Handlers.PlayerEvents.Joined += OnJoined;
-        
-        
+        PlayerEvents.Joined += OnJoined;
+
+
         AudioClipStorage.LoadClip(Plugin.Instance.Config.SpraySoundEffectPath, "spray_sound_effect");
-        
+
         ServerSpecificSettingsSync.ServerOnSettingValueReceived += OnSSSReceived;
-        
-        var extra = new ServerSpecificSettingBase[]
+
+        ServerSpecificSettingBase[] extra = new ServerSpecificSettingBase[]
         {
             new SSGroupHeader(Plugin.Instance.Translation.SprayGroupHeader),
             new SSKeybindSetting(
@@ -48,9 +48,9 @@ public static class EventHandlers
             )
         };
 
-        var existing = ServerSpecificSettingsSync.DefinedSettings ?? [];
+        ServerSpecificSettingBase[] existing = ServerSpecificSettingsSync.DefinedSettings ?? [];
 
-        var combined = new ServerSpecificSettingBase[existing.Length + extra.Length];
+        ServerSpecificSettingBase[] combined = new ServerSpecificSettingBase[existing.Length + extra.Length];
         existing.CopyTo(combined, 0);
         extra.CopyTo(combined, existing.Length);
 
@@ -72,7 +72,7 @@ public static class EventHandlers
     {
         if (!Player.TryGet(hub.networkIdentity, out Player player))
             return;
-        
+
         // Check if the setting is the keybind setting and if it is pressed
         if (ev is SSKeybindSetting keybindSetting &&
             keybindSetting.SettingId == Plugin.Instance.Config.KeybindId &&
@@ -81,13 +81,10 @@ public static class EventHandlers
             PlaceSpray(player);
             return;
         }
-        
+
         if (ev is SSButton button && button.SettingId == Plugin.Instance.Config.KeybindId)
         {
-            if (RefreshCooldowns.TryGetValue(player.PlayerId, out int cooldown) && cooldown > Time.time)
-            {
-                return;
-            }
+            if (RefreshCooldowns.TryGetValue(player.PlayerId, out int cooldown) && cooldown > Time.time) return;
             // Reload spray for the player
             _ = SetSprayForUserFromBackend(player.UserId);
             player.SendHint(Plugin.Instance.Translation.SpraysRefreshed, 10f);
@@ -95,17 +92,17 @@ public static class EventHandlers
             Logger.Debug($"Reloaded spray for player {player.UserId} ({player.PlayerId})");
         }
     }
-    
+
     private static async void PlaceSpray(Player player)
     {
         if (player == null || !player.IsAlive || player.IsDisarmed)
             return;
-        
+
         if (Cooldowns.TryGetValue(player.PlayerId, out int cooldown) && cooldown > Time.time)
         {
             float remaining = Mathf.Round((cooldown - Time.time) * 10f) / 10f;
             string message = Plugin.Instance.Translation.AbilityOnCooldown.Replace("{remaining}", $"{remaining}");
-            player.SendHint(message, 3f);
+            player.SendHint(message);
             return;
         }
 
@@ -114,89 +111,86 @@ public static class EventHandlers
 
         // Ignored layers
         int ignoredLayers =
-            (1 << 1)  | // TransparentFX
-            (1 << 8)  | // Player
+            (1 << 1) | // TransparentFX
+            (1 << 8) | // Player
             (1 << 13) | // Hitbox
             (1 << 16) | // InvisibleCollider
             (1 << 17) | // Ragdoll
             (1 << 18) | // CCTV
             (1 << 20) | // Grenade
             (1 << 28) | // Skybox
-            (1 << 29);  // Fence
+            (1 << 29); // Fence
 
         int layerMask = ~ignoredLayers;
 
         if (!Physics.Raycast(origin, direction, out RaycastHit hit, 2.5f, layerMask))
             return;
 
-        if (Player.TryGet(hit.transform.gameObject, out _))
-        {
-            return;
-        }
+        if (Player.TryGet(hit.transform.gameObject, out _)) return;
 
-        Logger.Debug($"Hit layer: {LayerMask.LayerToName(hit.transform.gameObject.layer)} ({hit.transform.gameObject.layer})");
+        Logger.Debug(
+            $"Hit layer: {LayerMask.LayerToName(hit.transform.gameObject.layer)} ({hit.transform.gameObject.layer})");
 
         if (string.IsNullOrEmpty(Sprays[player.UserId]))
         {
             player.SendHint(Plugin.Instance.Translation.NoSprayFound, 10f);
             return;
         }
-        
-        if (ActiveSprays.TryGetValue(player.PlayerId, out var sprays) && sprays?.Count > 0)
+
+        if (ActiveSprays.TryGetValue(player.PlayerId, out List<TextToy> sprays) && sprays?.Count > 0)
         {
-            sprays.ForEach(s => {
-                if (!s.IsDestroyed)
-                {
-                    s.Destroy();
-                }
+            sprays.ForEach(s =>
+            {
+                if (!s.IsDestroyed) s.Destroy();
             });
             ActiveSprays.Remove(player.PlayerId);
         }
-        
+
         // Get spray text from backend
         string sprayText = Sprays[player.UserId];
-        
+
         Vector3 forward = -hit.normal;
         Vector3 right = Vector3.Cross(Vector3.up, forward).normalized;
         Vector3 up = Vector3.Cross(forward, right).normalized;
 
         Vector3 basePos = hit.point + hit.normal * 0.01f;
         Quaternion rotation = Quaternion.LookRotation(forward);
-        Vector3 realScale = new Vector3(0.015f, 0.01f, 1f);
-        
+        Vector3 realScale = new(0.015f, 0.01f, 1f);
+
         Timing.RunCoroutine(SpawnSpray(basePos, rotation, realScale, sprayText, hit.transform, player.PlayerId));
 
         PlaySoundEffect(basePos);
 
         Cooldowns[player.PlayerId] = (int)(Time.time + Plugin.Instance.Config.CooldownDuration);
         player.SendHitMarker(); // funny
-        player.SendHint(Plugin.Instance.Translation.AbilityUsed, 3f);
+        player.SendHint(Plugin.Instance.Translation.AbilityUsed);
     }
-    
-    private static IEnumerator<float> SpawnSpray(Vector3 basePos, Quaternion rotation, Vector3 scale, string sprayText, Transform parent, int playerId)
+
+    private static IEnumerator<float> SpawnSpray(Vector3 basePos, Quaternion rotation, Vector3 scale, string sprayText,
+        Transform parent, int playerId)
     {
         string[] lines = sprayText.Split('\n').Where(line => !string.IsNullOrWhiteSpace(line)).ToArray();
 
         float lineSpacing = 0.01f; // Manual line spacing - adjust this value as needed
-        
+
         // Calculate total height of the spray
         float totalHeight = (lines.Length - 1) * lineSpacing;
-        
+
         // Start at half the total height above the hit point to center the spray
         Vector3 pos = basePos + rotation * Vector3.up * (totalHeight / 2);
-        
+
         ActiveSprays[playerId] = new List<TextToy>();
         for (int i = 0; i < lines.Length; i++)
         {
             ActiveSprays[playerId].Add(CreateText(pos, scale, rotation, lines[i], parent));
-            
+
             // Move down for next line
             pos -= rotation * Vector3.up * lineSpacing;
 
             yield return Timing.WaitForOneFrame;
         }
     }
-    
+
     private static TextToy CreateText(Vector3 pos, Vector3 scale, Quaternion rot, string text, Transform parent)
     {
         TextToy textToy = TextToy.Create();
@@ -208,7 +202,7 @@ public static class EventHandlers
 
         Timing.RunCoroutine(SprayLifeTime(pos, parent, textToy));
         Timing.CallDelayed(300f, textToy.Destroy);
-        
+
         return textToy;
     }
 
@@ -216,27 +210,25 @@ public static class EventHandlers
     {
         Vector3 oldParentPosition = parent.position;
         Quaternion oldParentRotation = parent.rotation;
-        while(!textToy.IsDestroyed)
+        while (!textToy.IsDestroyed)
         {
-            textToy.Position += (parent.position - oldParentPosition);
+            textToy.Position += parent.position - oldParentPosition;
             textToy.Rotation = parent.rotation * Quaternion.Inverse(oldParentRotation) * textToy.Rotation;
             oldParentPosition = parent.position;
             oldParentRotation = parent.rotation;
-            
+
             yield return Timing.WaitForOneFrame;
         }
     }
-    
-    
 
 
     private static void PlaySoundEffect(Vector3 pos)
     {
-        AudioPlayer audioPlayer = AudioPlayer.CreateOrGet($"sprayed_audioplayer" + pos.GetHashCode());
+        AudioPlayer audioPlayer = AudioPlayer.CreateOrGet("sprayed_audioplayer" + pos.GetHashCode());
         audioPlayer.AddSpeaker("sprayed_speaker" + pos.GetHashCode(), pos, 10F, true, 5F, 1000F);
         audioPlayer.DestroyWhenAllClipsPlayed = true;
         audioPlayer.AddClip("spray_sound_effect", 10F);
-        
+
         Logger.Debug("Playing sound effect at position: " + pos);
     }
 
@@ -244,34 +236,33 @@ public static class EventHandlers
     {
         try
         {
-            var config = Plugin.Instance.Config;
+            Config config = Plugin.Instance.Config;
             string endpoint = $"{config.BackendURL}/spray?userid={userId}";
 
             Logger.Debug($"Fetching spray from endpoint: {endpoint}");
 
-            using (var client = new HttpClient())
+            using (HttpClient client = new())
             {
                 client.DefaultRequestHeaders.Add("Authorization", config.BackendAPIToken);
 
-                var response = await client.GetAsync(endpoint);
+                HttpResponseMessage response = await client.GetAsync(endpoint);
 
                 if (response.IsSuccessStatusCode)
                 {
-                    var sprayText = await response.Content.ReadAsStringAsync();
+                    string sprayText = await response.Content.ReadAsStringAsync();
                     Logger.Debug($"Successfully fetched spray for Steam ID: {userId}");
                     Sprays[userId] = sprayText;
                 }
                 else
                 {
                     Logger.Debug($"Failed to fetch spray for User ID: {userId}. Status: {response.StatusCode}");
-                    Sprays[userId] = String.Empty;
+                    Sprays[userId] = string.Empty;
                 }
             }
         }
         catch (Exception ex)
         {
             Logger.Debug($"Exception while fetching spray for Steam ID {userId}: {ex}");
-            return;
         }
     }
 }
