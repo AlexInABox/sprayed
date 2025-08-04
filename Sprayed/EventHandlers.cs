@@ -26,7 +26,7 @@ public static class EventHandlers
         PlayerEvents.Joined += OnJoined;
 
 
-        AudioClipStorage.LoadClip(Plugin.Instance.Config.SpraySoundEffectPath, "spray_sound_effect");
+        AudioClipStorage.LoadClip(Plugin.Instance.Config!.SpraySoundEffectPath, "spray_sound_effect");
 
         ServerSpecificSettingsSync.ServerOnSettingValueReceived += OnSSSReceived;
 
@@ -34,13 +34,13 @@ public static class EventHandlers
         {
             new SSGroupHeader(Plugin.Instance.Translation.SprayGroupHeader),
             new SSKeybindSetting(
-                Plugin.Instance.Config.KeybindId,
+                Plugin.Instance.Config!.KeybindId,
                 Plugin.Instance.Translation.KeybindSettingLabel,
                 KeyCode.None, false, false,
                 Plugin.Instance.Translation.KeybindSettingHintDescription),
-            new SSButton(Plugin.Instance.Config.KeybindId, null, Plugin.Instance.Translation.ReloadSprayButtonLabel),
+            new SSButton(Plugin.Instance.Config!.KeybindId, null, Plugin.Instance.Translation.ReloadSprayButtonLabel),
             new SSTextArea(
-                Plugin.Instance.Config.KeybindId,
+                Plugin.Instance.Config!.KeybindId,
                 "<link=https://dev.zeitvertreib.vip/dashboard><align=center><color=#8A2BE2><size=110%><u>Klicke hier um dein eigenes Spray festzulegen!</u></size></color></align></link>",
                 SSTextArea.FoldoutMode.NotCollapsable,
                 null,
@@ -75,14 +75,14 @@ public static class EventHandlers
 
         // Check if the setting is the keybind setting and if it is pressed
         if (ev is SSKeybindSetting keybindSetting &&
-            keybindSetting.SettingId == Plugin.Instance.Config.KeybindId &&
+            keybindSetting.SettingId == Plugin.Instance.Config!.KeybindId &&
             keybindSetting.SyncIsPressed)
         {
             PlaceSpray(player);
             return;
         }
 
-        if (ev is SSButton button && button.SettingId == Plugin.Instance.Config.KeybindId)
+        if (ev is SSButton button && button.SettingId == Plugin.Instance.Config!.KeybindId)
         {
             if (RefreshCooldowns.TryGetValue(player.PlayerId, out int cooldown) && cooldown > Time.time) return;
             // Reload spray for the player
@@ -150,8 +150,6 @@ public static class EventHandlers
         string sprayText = Sprays[player.UserId];
 
         Vector3 forward = -hit.normal;
-        Vector3 right = Vector3.Cross(Vector3.up, forward).normalized;
-        Vector3 up = Vector3.Cross(forward, right).normalized;
 
         Vector3 basePos = hit.point + hit.normal * 0.01f;
         Quaternion rotation = Quaternion.LookRotation(forward);
@@ -161,7 +159,7 @@ public static class EventHandlers
 
         PlaySoundEffect(basePos);
 
-        Cooldowns[player.PlayerId] = (int)(Time.time + Plugin.Instance.Config.CooldownDuration);
+        Cooldowns[player.PlayerId] = (int)(Time.time + Plugin.Instance.Config!.CooldownDuration);
         player.SendHitMarker(); // funny
         player.SendHint(Plugin.Instance.Translation.AbilityUsed);
     }
@@ -181,7 +179,7 @@ public static class EventHandlers
 
         ActiveSprays[playerId] = new List<TextToy>();
         ActiveSprays[playerId].Add(CreateText(pos, scale, rotation, lines[0], parent));
-        foreach (string line in lines)
+        foreach (string _ in lines)
         {
             ActiveSprays[playerId].Add(CreateText(pos, scale, rotation, "", parent));
 
@@ -207,13 +205,13 @@ public static class EventHandlers
         textToy.Position = pos;
 
 
-        Timing.RunCoroutine(SprayLifeTime(pos, parent, textToy));
+        Timing.RunCoroutine(SprayLifeTime(parent, textToy));
         Timing.CallDelayed(300f, textToy.Destroy);
 
         return textToy;
     }
 
-    private static IEnumerator<float> SprayLifeTime(Vector3 basePos, Transform parent, TextToy textToy)
+    private static IEnumerator<float> SprayLifeTime(Transform parent, TextToy textToy)
     {
         // Cache the local offset
         Vector3 localOffset = Quaternion.Inverse(parent.rotation) * (textToy.Position - parent.position);
@@ -221,9 +219,14 @@ public static class EventHandlers
 
         while (!textToy.IsDestroyed)
         {
-            // Reapply full transform each frame
-            textToy.Position = parent.position + parent.rotation * localOffset;
-            textToy.Rotation = parent.rotation * localRotation;
+            Vector3 newPos = parent.position + parent.rotation * localOffset;
+            Quaternion newRot = parent.rotation * localRotation;
+
+            if (textToy.Position != newPos)
+                textToy.Position = newPos;
+
+            if (textToy.Rotation != newRot)
+                textToy.Rotation = newRot;
 
             yield return Timing.WaitForOneFrame;
         }
@@ -244,7 +247,7 @@ public static class EventHandlers
     {
         try
         {
-            Config config = Plugin.Instance.Config;
+            Config config = Plugin.Instance.Config!;
             string endpoint = $"{config.BackendURL}/spray?userid={userId}";
 
             Logger.Debug($"Fetching spray from endpoint: {endpoint}");
