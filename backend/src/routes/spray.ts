@@ -31,28 +31,51 @@ export async function onRequestGet(request: Request, env: Env, ctx: ExecutionCon
         const kvKey = `spray_${actualId}`;
 
         // Look up spray data in KV storage
-        const sprayData = await env.KV.get(kvKey, "json") as { pixelString?: string } | null;
+        const sprayData = await env.KV.get(kvKey, "json") as {
+            pixelString?: string;
+            pixelFrames?: string[];
+            isGif?: boolean;
+        } | null;
 
         if (!sprayData) {
             console.log('No spray data found for user ID:', userId, 'extracted ID:', actualId);
             return new Response("Spray data not found", { status: 404 });
         }
 
-        // Extract pixelString from the spray data
-        const pixelString = sprayData.pixelString;
+        // Check if this is a GIF and handle accordingly
+        if (sprayData.isGif === true) {
+            // For GIFs, return the pixelFrames array
+            const pixelFrames = sprayData.pixelFrames;
 
-        if (!pixelString) {
-            console.log('No pixelString found in spray data for user ID:', userId, 'extracted ID:', actualId);
-            return new Response("Pixel string not found", { status: 404 });
-        }
-
-        console.log('Successfully retrieved pixelString for user ID:', userId, 'extracted ID:', actualId);
-        return new Response(pixelString, {
-            status: 200,
-            headers: {
-                'Content-Type': 'text/plain'
+            if (!pixelFrames || !Array.isArray(pixelFrames) || pixelFrames.length === 0) {
+                console.log('No pixelFrames found in spray data for user ID:', userId, 'extracted ID:', actualId);
+                return new Response("Pixel frames not found", { status: 404 });
             }
-        });
+
+            console.log('Successfully retrieved pixelFrames for user ID:', userId, 'extracted ID:', actualId, 'frame count:', pixelFrames.length);
+            return new Response(JSON.stringify(pixelFrames), {
+                status: 200,
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+        } else {
+            // For static images, return the pixelString
+            const pixelString = sprayData.pixelString;
+
+            if (!pixelString) {
+                console.log('No pixelString found in spray data for user ID:', userId, 'extracted ID:', actualId);
+                return new Response("Pixel string not found", { status: 404 });
+            }
+
+            console.log('Successfully retrieved pixelString for user ID:', userId, 'extracted ID:', actualId);
+            return new Response(pixelString, {
+                status: 200,
+                headers: {
+                    'Content-Type': 'text/plain'
+                }
+            });
+        }
 
     } catch (error) {
         console.error('Spray GET error:', error);
