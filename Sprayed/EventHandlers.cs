@@ -292,7 +292,7 @@ public class SprayRenderer
     {
         int maxLines = Math.Min(textToys.Count, frameLines.Length);
         for (int i = 0; i < maxLines; i++)
-            if (textToys[i] != null && !textToys[i].IsDestroyed)
+            if (textToys[i] != null && !textToys[i].IsDestroyed && textToys[i].TextFormat != frameLines[i])
                 textToys[i].TextFormat = frameLines[i];
     }
 
